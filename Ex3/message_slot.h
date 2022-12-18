@@ -13,7 +13,9 @@ struct channel_data {
 struct device_data {
     int minor_number;
     long open_channel_id;
+    int opened;
     struct channel_data* head;
+    struct channel_data* open_channel;
 };
 
 

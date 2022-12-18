@@ -15,42 +15,35 @@ argv[2] = target message channel id (non negative integer)
 argv[3] = the message to pass */
 
 int main(int argc, char** argv) {
-    printf("let's start with argc being %i \n", argc);
+    printf("starting message_sender");
     if (argc !=4) {
         if (argc < 4) {
-        printf("huh?");
         perror("Missing arguments in message_sender call");
         exit(1);
     } else if (argc > 4) {
-        printf("mm...");
         perror("Too many arguments in message_sender call");
         exit(1);
     }
     }
     char* file_path = argv[1];
-    printf("got here 1\n");
     unsigned long channel_id = atoi(argv[2]);
-    printf("got here 2\n");
     char* msg = argv[3];
-    printf("got here 3\n");
     /* using the open, ioctl and write functions to implement this */
     int file_dest = open(file_path, O_RDWR);
     if (file_dest < 0) {
         perror("Problem while opening file destination");
         exit(1);
     }
-    printf("got here 4\n");
     if (ioctl(file_dest, MSG_SLOT_CHANNEL, channel_id) < 0) {
         /* a command to set the file's channel to channel_id */
         perror("The command ioctl failed");
         exit(1);
     } 
-    printf("got here 5\n");
     if (write(file_dest, msg, strlen(msg)) < 0) {
         perror("The command write failed");
         exit(1);
     }
-    printf("got here 6\n");
     close(file_dest);
+    printf("finishing message sender\n");
     return 0;
 }

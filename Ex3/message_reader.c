@@ -14,6 +14,7 @@ argv[2] = target message channel id (non negative integer) */
 
 int main(int argc, char** argv) {
     char buffer[MAX_BUFFER];
+    printf("starting message reader\n");
     if (argc != 3) {
         /* validating that the correct number of cmd args is passed */
         if (argc < 3) {
@@ -29,29 +30,29 @@ int main(int argc, char** argv) {
     unsigned long channel_id = atoi(argv[2]);
     /* using the open, ioctl, read and write functions to implement this */
     int file_dest = open(file_path, O_RDWR);
-    printf("read 1");
+    printf("read 1\n");
     if (file_dest < 0) {
         perror("Problem while opening file destination");
         exit(1);
     } 
-    printf("read 2");
+    printf("read 2\n");
     if (ioctl(file_dest, MSG_SLOT_CHANNEL, channel_id) < 0) {
         /* a command to set the file's channel to channel_id */
         perror("The command ioctl failed");
         exit(1);
     }
-    printf("read 3");
+    printf("read 3\n");
     if (read(file_dest, buffer, MAX_BUFFER) < 0) {
         perror("The command read failed");
         exit(1);
     }
-    printf("read 4");
+    printf("read 4\n");
     if (write(STDOUT_FILENO, buffer, MAX_BUFFER) < 0) {
         perror("The command write failed");
         exit(1);
     }
-    printf("read 5");
+    printf("read 5\n");
     close(file_dest);
-    printf("read 6");
+    printf("finishing message reader\n");
     return 0;
 }

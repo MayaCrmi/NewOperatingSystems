@@ -25,17 +25,17 @@ sudo chmod 777 /dev/msg8
 MODULE_LICENSE("GPL");
 static struct device_data devices_list[256];
 
-// void free_allocated_memory(void) {
-//     int i;
-//     for (i=0 ; i < 256 ; i++) {
-//         channel_data curr = devices_list[i] -> head;
-//         while (curr) {
-//             channel_data* dummy = curr;
-//             curr = curr -> next;
-//             kfree(dummy);
-//         }
-//         }
-// }
+void free_allocated_memory(void) {
+    int i;
+    for (i=0 ; i < 256 ; i++) {
+        struct channel_data* curr = devices_list[i].head;
+        while (curr) {
+            struct channel_data* dummy = curr;
+            curr = curr -> next;
+            kfree(dummy);
+        }
+    }
+}
 
 struct channel_data* find_channel(struct device_data* device, int channel_num) {
     struct channel_data* curr = device -> head;
@@ -56,49 +56,49 @@ struct channel_data* find_channel(struct device_data* device, int channel_num) {
 static int device_open(struct inode* inode, struct file* file) {
     int minor = iminor(inode);
     struct device_data* new_device;
-    printk("open module 1\n");
-    if ((devices_list[minor].head) == NULL) {
-        printk("open module 2\n");
+    printk("open: Going in\n");
+    printk("open: Current minor is %d", minor);
+    if ((devices_list[minor].opened) == 0) {
+        printk("open: devices_list[minor].opened was 0\n");
         new_device = kmalloc(sizeof(struct device_data), GFP_KERNEL);
         if (!new_device) {
             return -ENOMEM;
         }
-        printk("open module 3\n");
         new_device -> minor_number = minor;
-        printk("open module 4\n");
+        new_device -> opened = 1;
         devices_list[minor] = *new_device;
-        printk("open module 5\n");
         file -> private_data = (void*) new_device;
+    } else {
+        printk("open: devices_list[minor].opened was 1\n");
+        file -> private_data = (void*) &devices_list[minor];
     }
-    printk("open module LAST PRINT BEFORE RETURN got here 6\n");
+    printk("open: Finishing\n");
     return 0;
 }
 
 static long device_ioctl(struct file* file, unsigned int cmd, unsigned long channel) {    
     struct device_data* device;
     struct channel_data* curr_channel;
-    printk("ioctl module 1\n");
+    printk("ioctl: Going in\n");
     if ((channel == 0) || (cmd != MSG_SLOT_CHANNEL)) {
         return -EINVAL;
     }
-    printk("ioctl module 2\n");
     device = (struct device_data*)file -> private_data;
     curr_channel = find_channel(device, channel);
     if (!curr_channel) {
-        printk("ioctl module 3\n");
+        printk("ioctl: There was no curr_channel\n");
         curr_channel = kmalloc(sizeof(struct channel_data), GFP_KERNEL);
         if (!curr_channel) {
-            printk("ioctl module 4\n");
             return -ENOMEM;
         }
         curr_channel -> channel_id = channel;
-        printk("ioctl module 5\n");
         curr_channel -> next = device -> head;
         device -> head = curr_channel;
+        
     }
-    printk("ioctl module 6\n");
     (device -> open_channel_id) = channel;
-    printk("ioctl module 7, working channel is %lu", device -> open_channel_id);
+    (device -> open_channel) = curr_channel;
+    printk("ioctl: Finishing, working channel is %lu\n", device -> open_channel_id);
     return 0;
 }
 
@@ -107,25 +107,22 @@ static ssize_t device_read(struct file* file, char* buffer, size_t msglen, loff_
     int minor, curr_channel_id, channel_msglen;
     struct device_data* device;
     struct channel_data* curr_channel;
-    printk("read module 1\n");
+    printk("read: Going in\n");
     minor = iminor(file -> f_inode);
-    printk("read module 2\n");
+    printk("read: Current minor is %d", minor);
     device = (struct device_data*)file -> private_data;
-    printk("read module 3\n");
     curr_channel_id = device -> open_channel_id;
-    printk("read module 4\n");
     if (buffer == NULL || curr_channel_id == 0) {
         return -EINVAL;
     }
-    printk("read module 5\n");
     curr_channel = find_channel(device, curr_channel_id);
-    printk("read module 6\n");
-    if (curr_channel == NULL) {
+    if (!curr_channel || curr_channel -> channel_id == 0) {
+        printk("read: inside error, channel_id is %lu\n", curr_channel -> channel_id);
         return -ENOMEM;
     }
-    printk("read module 7\n");
+    printk("read: didn't get error, channel_id is %lu\n", curr_channel -> channel_id);
     channel_msglen = curr_channel -> msglen;
-    printk("read module 8\n");
+    printk("read: updated message length for channel\n");
     if (channel_msglen <= 0) {
         return -EWOULDBLOCK;
     }
@@ -154,43 +151,34 @@ static ssize_t device_write(struct file* file, const char* buffer, size_t msglen
     struct device_data* device;
     struct channel_data* curr_channel;
     int i=0;
-    printk("write module 1\n");
+    printk("write: Going in\n");
     minor = iminor(file -> f_inode);
-    printk("write module 2\n");
     device = (struct device_data*)file -> private_data;
-    printk("write module 3\n");
     curr_channel_id = device -> open_channel_id;
-    printk("write module 4\n");
     if (buffer == NULL || curr_channel_id == 0) {
         return -EINVAL;
     }
-    printk("write module 5\n");
     if (msglen == 0 || msglen > MAX_BUFFER) {
         return -EMSGSIZE;
     }
-    printk("write module 6\n");
     curr_channel = find_channel(device, curr_channel_id);
-    printk("write module 7\n");
-    if (!curr_channel) {
+    if (!curr_channel || curr_channel -> channel_id == 0) {
+        printk("write: inside error, channel_id is %lu\n", curr_channel -> channel_id);
         return -EINVAL;
     }
-    printk("write module 8\n");
+    printk("write: didn't get error, channel_id is %lu\n", curr_channel -> channel_id);
     while (i < msglen) {
         char put_here = curr_channel -> msg[i];
         const char* to_put = &buffer[i];
         get_user(put_here, to_put);
         i++;
     }
-    printk("write module 9\n");
     if (i != msglen) {
         printk("The message hasn't been written successfully\n");
         return -1;
     }
-    printk("write module got here 10\n");
-    printk("1) i is %d while curr_channel's msglen is %d\n", i, curr_channel -> msglen);
     curr_channel -> msglen = i;
-    printk("2) i is %d while curr_channel's msglen is %d\n", i, curr_channel -> msglen);
-    printk("write module LAST PRINT BEFORE RETURN 10\n");
+    printk("write: Finishing\n");
     return i;
 }
 
@@ -218,7 +206,7 @@ static int __init message_slot_init(void) {
 
 static void __exit message_slot_exit(void) {
     printk("Before unloading the module, free all memory that was allocated\n");
-    //free_allocated_memory();
+    free_allocated_memory();
     printk("Exiting the message slot module\n");
     unregister_chrdev(MAJOR_NUMBER, "message_slot");
 }

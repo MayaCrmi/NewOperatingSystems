@@ -32,6 +32,7 @@ __used __section("__versions") = {
 	{ 0x289828cc, "__register_chrdev" },
 	{ 0xc3aaf0a9, "__put_user_1" },
 	{ 0x167e7f9d, "__get_user_1" },
+	{ 0x37a0cba, "kfree" },
 	{ 0x5b8239ca, "__x86_return_thunk" },
 	{ 0x7c797b6, "kmem_cache_alloc_trace" },
 	{ 0xd731cdd9, "kmalloc_caches" },
@@ -43,4 +44,4 @@ __used __section("__versions") = {
 MODULE_INFO(depends, "");
 
 
-MODULE_INFO(srcversion, "41DAE18FBD562E39C5B1E84");
+MODULE_INFO(srcversion, "0E92643E9EBF228750FA81A");

@@ -1,0 +1,4 @@
+To compile:
+cd ~/Desktop/OperatingSystems/Ex1
+gcc -O3 -Wall -std=c11 os.c pt.c -o myProgramName
+./myProgramName

@@ -1,0 +1,1 @@
+cmd_/home/student/Desktop/OperatingSystems/Ex3/message_slot.ko := ld -r  -m elf_x86_64 -z noexecstack   --build-id=sha1  -T scripts/module.lds -o /home/student/Desktop/OperatingSystems/Ex3/message_slot.ko /home/student/Desktop/OperatingSystems/Ex3/message_slot.o /home/student/Desktop/OperatingSystems/Ex3/message_slot.mod.o;  true

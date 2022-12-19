@@ -37,13 +37,13 @@ void free_allocated_memory(void) {
     }
 }
 
-struct channel_data* find_channel(struct device_data* device, int channel_num) {
+struct channel_data* find_channel(struct device_data* device, unsigned long channel_num) {
     struct channel_data* curr = device -> head;
     printk("inside find_channel now\n");
     if (curr) {
         while (curr -> next) {
             if ((curr -> channel_id) == channel_num) {
-                printk("Found channel number %ld in find_channel\n", curr -> channel_id);
+                printk("Found channel number %lu in find_channel\n", curr -> channel_id);
                 return curr;
             }
             curr = curr -> next;
@@ -98,13 +98,15 @@ static long device_ioctl(struct file* file, unsigned int cmd, unsigned long chan
     }
     (device -> open_channel_id) = channel;
     (device -> open_channel) = curr_channel;
+    devices_list[device->minor_number] = *device;
     printk("ioctl: Finishing, working channel is %lu\n", device -> open_channel_id);
     return 0;
 }
 
 static ssize_t device_read(struct file* file, char* buffer, size_t msglen, loff_t* offset) {
     int i=0;
-    int minor, curr_channel_id, channel_msglen;
+    unsigned long curr_channel_id;
+    int minor, channel_msglen;
     struct device_data* device;
     struct channel_data* curr_channel;
     printk("read: Going in\n");
@@ -122,32 +124,31 @@ static ssize_t device_read(struct file* file, char* buffer, size_t msglen, loff_
     }
     printk("read: didn't get error, channel_id is %lu\n", curr_channel -> channel_id);
     channel_msglen = curr_channel -> msglen;
-    printk("read: updated message length for channel\n");
+    printk("read: updated message length for channel to be %d\n", channel_msglen);
     if (channel_msglen <= 0) {
         return -EWOULDBLOCK;
     }
-    printk("read module 9\n");
     if (channel_msglen > msglen) {
         return -ENOSPC;
     }
-    printk("read module 10\n");
     while (i < msglen && i < channel_msglen) {
         char to_put = curr_channel -> msg[i];
         char* put_here = &buffer[i];
         put_user(to_put, put_here);
         i += 1;
     }
-    printk("read module 11\n");
-    if (i != msglen) {
+    printk("read: finished writing with i being %d and msglen being %zu \n", i, msglen);
+    if (i != channel_msglen) {
         printk("The message hasn't been read successfully\n");
         return -1;
     }
-    printk("read module LAST PRINT BEFORE RETURN 12\n");
+    printk("read: LAST PRINT BEFORE RETURN\n");
     return i;
 }
 
 static ssize_t device_write(struct file* file, const char* buffer, size_t msglen, loff_t* offset) { 
-    int minor, curr_channel_id;
+    int minor;
+    unsigned long curr_channel_id;
     struct device_data* device;
     struct channel_data* curr_channel;
     int i=0;
@@ -178,7 +179,7 @@ static ssize_t device_write(struct file* file, const char* buffer, size_t msglen
         return -1;
     }
     curr_channel -> msglen = i;
-    printk("write: Finishing\n");
+    printk("write: Finishing with msglen being %d\n", i);
     return i;
 }
 

@@ -21,4 +21,4 @@ struct device_data {
 
 
 void free_allocated_memory(void);
-struct channel_data* find_channel(struct device_data* device, int channel_num);
+struct channel_data* find_channel(struct device_data* device, unsigned long channel_num);

@@ -15,7 +15,7 @@ argv[2] = target message channel id (non negative integer)
 argv[3] = the message to pass */
 
 int main(int argc, char** argv) {
-    printf("starting message_sender");
+    printf("starting message_sender\n");
     if (argc !=4) {
         if (argc < 4) {
         perror("Missing arguments in message_sender call");

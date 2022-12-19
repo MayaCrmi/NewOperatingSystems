@@ -8,21 +8,14 @@
 #include <ctype.h>
 #include <sys/ioctl.h>
 
-/* check to see that the correct number of args has been sent to the program
-command line args will be:
-argv[1] = message slot file path
-argv[2] = target message channel id (non negative integer)
-argv[3] = the message to pass */
-
 int main(int argc, char** argv) {
-    printf("starting message_sender\n");
     if (argc !=4) {
         if (argc < 4) {
-        perror("Missing arguments in message_sender call");
-        exit(1);
-    } else if (argc > 4) {
-        perror("Too many arguments in message_sender call");
-        exit(1);
+            perror("Missing arguments in message_sender call");
+            exit(1);
+        } else if (argc > 4) {
+            perror("Too many arguments in message_sender call");
+            exit(1);
     }
     }
     char* file_path = argv[1];
@@ -35,15 +28,15 @@ int main(int argc, char** argv) {
         exit(1);
     }
     if (ioctl(file_dest, MSG_SLOT_CHANNEL, channel_id) < 0) {
-        /* a command to set the file's channel to channel_id */
+        /* set the file's channel to channel_id */
         perror("The command ioctl failed");
         exit(1);
     } 
     if (write(file_dest, msg, strlen(msg)) < 0) {
+        /* write the input message */
         perror("The command write failed");
         exit(1);
     }
     close(file_dest);
-    printf("finishing message sender\n");
     return 0;
 }

@@ -17,7 +17,6 @@ deps_/home/student/Desktop/OperatingSystems/Ex3/message_slot.o := \
     $(wildcard include/config/RETPOLINE) \
     $(wildcard include/config/ARCH_USE_BUILTIN_BSWAP) \
     $(wildcard include/config/KCOV) \
-  /home/student/Desktop/OperatingSystems/Ex3/message_slot.h \
   include/linux/kernel.h \
     $(wildcard include/config/PREEMPT_VOLUNTARY) \
     $(wildcard include/config/PREEMPT_DYNAMIC) \

@@ -1,17 +1,12 @@
-#include "message_slot.h"
+
+#define MAJOR_NUMBER 235
+#define MSG_SLOT_CHANNEL _IOW(MAJOR_NUMBER, 0, unsigned long)
+#define MAX_BUFFER 128
 
 #undef __KERNEL__
 #define __KERNEL__
 #undef MODULE
 #define MODULE
-
-/*
-make -> build the module
-sudo insmod message_slot.ko -> install the module
-sudo mknod /dev/msg8 c 235 8
-sudo chmod 777 /dev/msg8
-./message_sender /dev/msg8 99 "Writing this msg to channel number 99"
-*/
 
 /* from Eran's recitations' code */
 #include <linux/kernel.h>   /* We're doing kernel work */
@@ -23,8 +18,25 @@ sudo chmod 777 /dev/msg8
 #include <linux/slab.h>
 
 MODULE_LICENSE("GPL");
+
+struct channel_data {
+    long channel_id;
+    int msglen;
+    char msg[128];
+    struct channel_data* next;
+};
+
+struct device_data {
+    int minor_number;
+    long open_channel_id;
+    int opened;
+    struct channel_data* head;
+    struct channel_data* open_channel;
+};
+
 static struct device_data devices_list[256];
 
+/* before removing a module, free the linked lists containing the devices' channels data */
 void free_allocated_memory(void) {
     int i;
     for (i=0 ; i < 256 ; i++) {
@@ -37,29 +49,23 @@ void free_allocated_memory(void) {
     }
 }
 
+/* iterate over the linked list containing the device's channels and either return the one corresponding with the desired channel number or NULL */
 struct channel_data* find_channel(struct device_data* device, unsigned long channel_num) {
     struct channel_data* curr = device -> head;
-    printk("inside find_channel now\n");
     while (curr != NULL) {
-        printk(":(");
-        printk("in while, curr's channel is %lu", curr ->channel_id);
         if ((curr -> channel_id) == channel_num) {
-            printk("Found channel number %lu in find_channel\n", curr -> channel_id);
             return curr;
         }
         curr = curr -> next;
     }
-    printk("finishing find_channel");
     return curr;
 }
 
 static int device_open(struct inode* inode, struct file* file) {
     int minor = iminor(inode);
     struct device_data* new_device;
-    printk("open: Going in\n");
-    printk("open: Current minor is %d", minor);
     if ((devices_list[minor].opened) == 0) {
-        printk("open: devices_list[minor].opened was 0\n");
+        /* if this is the first time we opened a device with this minor number */
         new_device = kmalloc(sizeof(struct device_data), GFP_KERNEL);
         if (!new_device) {
             return -ENOMEM;
@@ -67,103 +73,80 @@ static int device_open(struct inode* inode, struct file* file) {
         new_device -> minor_number = minor;
         new_device -> opened = 1;
         devices_list[minor] = *new_device;
-        file -> private_data = (void*) new_device;
-    } else {
-        printk("open: devices_list[minor].opened was 1\n");
-        file -> private_data = (void*) (&devices_list[minor]);
-    }
-    printk("open: Finishing\n");
+    } 
+    /* set the current file's data to contain its corresponding device_data instance */
+    file -> private_data = (void*) (&devices_list[minor]);
     return 0;
 }
 
-static long device_ioctl(struct file* file, unsigned int cmd, unsigned long channel) {    
+static long device_ioctl(struct file* file, unsigned int cmd, unsigned long channel_number) {    
     struct device_data* device;
     struct channel_data* curr_channel;
-    printk("ioctl: Going in\n");
-    if ((channel == 0) || (cmd != MSG_SLOT_CHANNEL)) {
+    if ((channel_number == 0) || (cmd != MSG_SLOT_CHANNEL)) {
         return -EINVAL;
     }
-    printk("testing with prints-----");
-    printk("%d",((struct device_data*)(file -> private_data))->opened);
+    /* extract the current file's corresponding device_data */
     device = (struct device_data*)file -> private_data;
-    printk("testing with prints after extracting-----");
-    printk("%d",(device)->opened);
-    curr_channel = find_channel(device, channel);
+    curr_channel = find_channel(device, channel_number);
     if (!curr_channel) {
-        printk("ioctl: There was no curr_channel\n");
+        /* if we haven't used a channel with this number yet */
         curr_channel = kmalloc(sizeof(struct channel_data), GFP_KERNEL);
         if (!curr_channel) {
             return -ENOMEM;
         }
-        curr_channel -> channel_id = channel;
+        curr_channel -> channel_id = channel_number;
         curr_channel -> next = device -> head;
         device -> head = curr_channel;
         
     }
-    (device -> open_channel_id) = channel;
+    (device -> open_channel_id) = channel_number;
     (device -> open_channel) = curr_channel;
-    devices_list[device->minor_number] = *device;
-    printk("ioctl: Finishing, working channel is %lu\n", device -> open_channel_id);
-    printk("the channel of the head is supposed to be %lu", (devices_list[device->minor_number].head ->channel_id));
+    devices_list[device -> minor_number] = *device;
     return 0;
 }
 
 static ssize_t device_read(struct file* file, char* buffer, size_t length, loff_t* offset) {
     int i=0;
-    char test1[128];
     unsigned long curr_channel_id;
     int minor, channel_msglen;
     struct device_data* device;
     struct channel_data* curr_channel;
-    printk("read: Going in\n");
-    minor = iminor(file -> f_inode);
-    printk("read: Current minor is %d", minor);
     device = (struct device_data*)file -> private_data;
     curr_channel_id = device -> open_channel_id;
     if (buffer == NULL || curr_channel_id == 0) {
         return -EINVAL;
     }
+    minor = iminor(file -> f_inode);
     curr_channel = find_channel(device, curr_channel_id);
     if (!curr_channel || curr_channel -> channel_id == 0) {
-        printk("read: inside error, channel_id is %lu\n", curr_channel -> channel_id);
         return -ENOMEM;
     }
-    printk("read: didn't get error, channel_id is %lu\n", curr_channel -> channel_id);
     channel_msglen = curr_channel -> msglen;
-    printk("read: updated message length for channel to be %d\n", channel_msglen);
     if (channel_msglen <= 0) {
         return -EWOULDBLOCK;
     }
     if (channel_msglen > length) {
         return -ENOSPC;
     }
-    while (i < channel_msglen) {
-        test1[i] = curr_channel ->msg[i];
-        i ++;
-    }
-    printk("this is the message %s", test1);
-    i=0;
     while (i < length && i < channel_msglen) {
         put_user(curr_channel -> msg[i], &buffer[i]);
         i++;
     }
-    printk("read: finished writing with i being %d and msglen being %d \n", i, channel_msglen);
     if (i != channel_msglen) {
         printk("The message hasn't been read successfully\n");
         return -1;
     }
-    printk("read: LAST PRINT BEFORE RETURN\n");
     return i;
 }
 
 static ssize_t device_write(struct file* file, const char* buffer, size_t msglen, loff_t* offset) { 
+    int i=0;
     int minor;
     unsigned long curr_channel_id;
     struct device_data* device;
     struct channel_data* curr_channel;
-    int i=0;
-    printk("write: Going in\n");
     minor = iminor(file -> f_inode);
+    /* get the device data */
     device = (struct device_data*)file -> private_data;
     curr_channel_id = device -> open_channel_id;
     if (buffer == NULL || curr_channel_id == 0) {
@@ -172,12 +155,11 @@ static ssize_t device_write(struct file* file, const char* buffer, size_t msglen
     if (msglen == 0 || msglen > MAX_BUFFER) {
         return -EMSGSIZE;
     }
+    /* get the channel data */
     curr_channel = find_channel(device, curr_channel_id);
     if (!curr_channel || curr_channel -> channel_id == 0) {
-        printk("write: inside error, channel_id is %lu\n", curr_channel -> channel_id);
         return -EINVAL;
     }
-    printk("write: didn't get error, channel_id is %lu\n", curr_channel -> channel_id);
     while (i < msglen) {
         get_user(curr_channel -> msg[i], &buffer[i]);
         i++;
@@ -187,7 +169,6 @@ static ssize_t device_write(struct file* file, const char* buffer, size_t msglen
         return -1;
     }
     curr_channel -> msglen = i;
-    printk("write: Finishing with msglen being %d\n", i);
     return i;
 }
 
@@ -219,8 +200,6 @@ static void __exit message_slot_exit(void) {
     printk("Exiting the message slot module\n");
     unregister_chrdev(MAJOR_NUMBER, "message_slot");
 }
-
-
 
 module_init(message_slot_init)
 module_exit(message_slot_exit)

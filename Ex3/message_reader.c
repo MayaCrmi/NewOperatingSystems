@@ -13,6 +13,7 @@ argv[1] = message slot file path
 argv[2] = target message channel id (non negative integer) */
 
 int main(int argc, char** argv) {
+    int len;
     char buffer[MAX_BUFFER];
     printf("starting message reader\n");
     if (argc != 3) {
@@ -42,12 +43,13 @@ int main(int argc, char** argv) {
         exit(1);
     }
     printf("read 3\n");
-    if (read(file_dest, buffer, MAX_BUFFER) < 0) {
+    len = read(file_dest, buffer, MAX_BUFFER);
+    if (len < 0) {
         perror("The command read failed");
         exit(1);
     }
     printf("read 4\n");
-    if (write(STDOUT_FILENO, buffer, MAX_BUFFER) < 0) {
+    if (write(STDOUT_FILENO, buffer, len) < 0) {
         perror("The command write failed");
         exit(1);
     }

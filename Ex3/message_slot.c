@@ -40,16 +40,16 @@ void free_allocated_memory(void) {
 struct channel_data* find_channel(struct device_data* device, unsigned long channel_num) {
     struct channel_data* curr = device -> head;
     printk("inside find_channel now\n");
-    if (curr) {
-        while (curr -> next) {
-            if ((curr -> channel_id) == channel_num) {
-                printk("Found channel number %lu in find_channel\n", curr -> channel_id);
-                return curr;
-            }
-            curr = curr -> next;
+    while (curr != NULL) {
+        printk(":(");
+        printk("in while, curr's channel is %lu", curr ->channel_id);
+        if ((curr -> channel_id) == channel_num) {
+            printk("Found channel number %lu in find_channel\n", curr -> channel_id);
+            return curr;
         }
+        curr = curr -> next;
     }
-    printk("now finishing find_channel, returning NULL\n");
+    printk("finishing find_channel");
     return curr;
 }
 
@@ -70,7 +70,7 @@ static int device_open(struct inode* inode, struct file* file) {
         file -> private_data = (void*) new_device;
     } else {
         printk("open: devices_list[minor].opened was 1\n");
-        file -> private_data = (void*) &devices_list[minor];
+        file -> private_data = (void*) (&devices_list[minor]);
     }
     printk("open: Finishing\n");
     return 0;
@@ -83,7 +83,11 @@ static long device_ioctl(struct file* file, unsigned int cmd, unsigned long chan
     if ((channel == 0) || (cmd != MSG_SLOT_CHANNEL)) {
         return -EINVAL;
     }
+    printk("testing with prints-----");
+    printk("%d",((struct device_data*)(file -> private_data))->opened);
     device = (struct device_data*)file -> private_data;
+    printk("testing with prints after extracting-----");
+    printk("%d",(device)->opened);
     curr_channel = find_channel(device, channel);
     if (!curr_channel) {
         printk("ioctl: There was no curr_channel\n");
@@ -100,11 +104,13 @@ static long device_ioctl(struct file* file, unsigned int cmd, unsigned long chan
     (device -> open_channel) = curr_channel;
     devices_list[device->minor_number] = *device;
     printk("ioctl: Finishing, working channel is %lu\n", device -> open_channel_id);
+    printk("the channel of the head is supposed to be %lu", (devices_list[device->minor_number].head ->channel_id));
     return 0;
 }
 
-static ssize_t device_read(struct file* file, char* buffer, size_t msglen, loff_t* offset) {
+static ssize_t device_read(struct file* file, char* buffer, size_t length, loff_t* offset) {
     int i=0;
+    char test1[128];
     unsigned long curr_channel_id;
     int minor, channel_msglen;
     struct device_data* device;
@@ -128,16 +134,20 @@ static ssize_t device_read(struct file* file, char* buffer, size_t msglen, loff_
     if (channel_msglen <= 0) {
         return -EWOULDBLOCK;
     }
-    if (channel_msglen > msglen) {
+    if (channel_msglen > length) {
         return -ENOSPC;
     }
-    while (i < msglen && i < channel_msglen) {
-        char to_put = curr_channel -> msg[i];
-        char* put_here = &buffer[i];
-        put_user(to_put, put_here);
-        i += 1;
+    while (i < channel_msglen) {
+        test1[i] = curr_channel ->msg[i];
+        i ++;
     }
-    printk("read: finished writing with i being %d and msglen being %zu \n", i, msglen);
+    printk("this is the message %s", test1);
+    i=0;
+    while (i < length && i < channel_msglen) {
+        put_user(curr_channel -> msg[i], &buffer[i]);
+        i++;
+    }
+    printk("read: finished writing with i being %d and msglen being %d \n", i, channel_msglen);
     if (i != channel_msglen) {
         printk("The message hasn't been read successfully\n");
         return -1;
@@ -169,9 +179,7 @@ static ssize_t device_write(struct file* file, const char* buffer, size_t msglen
     }
     printk("write: didn't get error, channel_id is %lu\n", curr_channel -> channel_id);
     while (i < msglen) {
-        char put_here = curr_channel -> msg[i];
-        const char* to_put = &buffer[i];
-        get_user(put_here, to_put);
+        get_user(curr_channel -> msg[i], &buffer[i]);
         i++;
     }
     if (i != msglen) {

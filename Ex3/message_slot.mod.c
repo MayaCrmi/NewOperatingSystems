@@ -30,6 +30,7 @@ __used __section("__versions") = {
 	{ 0xf704969, "module_layout" },
 	{ 0x6bc3fbc0, "__unregister_chrdev" },
 	{ 0x289828cc, "__register_chrdev" },
+	{ 0xd0da656b, "__stack_chk_fail" },
 	{ 0xc3aaf0a9, "__put_user_1" },
 	{ 0x167e7f9d, "__get_user_1" },
 	{ 0x37a0cba, "kfree" },
@@ -44,4 +45,4 @@ __used __section("__versions") = {
 MODULE_INFO(depends, "");
 
 
-MODULE_INFO(srcversion, "77F8F42B7809C2DFEF19051");
+MODULE_INFO(srcversion, "D04047A606CA7B18175F9AE");

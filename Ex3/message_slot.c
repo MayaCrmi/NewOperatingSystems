@@ -172,12 +172,19 @@ static ssize_t device_write(struct file* file, const char* buffer, size_t msglen
     return i;
 }
 
+static int device_release (struct inode *inode, struct file *file) {
+    struct device_data* extracted_device = (struct device_data*) file -> private_data;
+    extracted_device -> open_channel_id = 0;
+    return 0;
+ }
+
 struct file_operations fops = {
     .owner = THIS_MODULE,
     .open = device_open,
     .unlocked_ioctl = device_ioctl,
     .read = device_read, 
     .write = device_write, 
+    .release = device_release,
 };
 
 

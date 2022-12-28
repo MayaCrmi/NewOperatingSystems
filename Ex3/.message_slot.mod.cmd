@@ -1,1 +1,0 @@
-cmd_/home/student/Desktop/OperatingSystems/Ex3/message_slot.mod := { echo  /home/student/Desktop/OperatingSystems/Ex3/message_slot.o;  echo; } > /home/student/Desktop/OperatingSystems/Ex3/message_slot.mod

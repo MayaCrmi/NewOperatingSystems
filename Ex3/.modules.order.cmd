@@ -1,1 +1,0 @@
-cmd_/home/student/Desktop/OperatingSystems/Ex3/modules.order := {   echo /home/student/Desktop/OperatingSystems/Ex3/message_slot.ko; :; } | awk '!x[$$0]++' - > /home/student/Desktop/OperatingSystems/Ex3/modules.order

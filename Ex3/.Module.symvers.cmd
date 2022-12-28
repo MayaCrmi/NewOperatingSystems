@@ -1,1 +1,0 @@
-cmd_/home/student/Desktop/OperatingSystems/Ex3/Module.symvers := sed 's/\.ko$$/\.o/' /home/student/Desktop/OperatingSystems/Ex3/modules.order | scripts/mod/modpost -m -a  -o /home/student/Desktop/OperatingSystems/Ex3/Module.symvers -e -i Module.symvers   -T -

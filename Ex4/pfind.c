@@ -28,7 +28,7 @@ struct fifo_dir_queue {
 
 struct thread_instance {
     struct thread_instance* next;
-    cnd_t cond;
+    cnd_t* cond;
 };
 
 struct thread_queue {
@@ -42,7 +42,7 @@ char* search_term;
 int threads_num, created_threads, waiting_threads, thread_error, found_files;
 struct fifo_dir_queue* queue;
 struct thread_queue* thread_queue;
-cnd_t finished_creating_threads, dir_in_queue;
+cnd_t finished_creating_threads;
 mtx_t lock;
 
 
@@ -57,9 +57,11 @@ void freeQueues() {
     }
     struct thread_instance* curr_thread = thread_queue -> head;
     while (curr_thread) {
-        struct thread_instance* dummy = curr_thread;
-        free(dummy);
-        cnd_destroy(&curr_thread -> cond);
+        struct thread_instance* dummy_thread = curr_thread;
+        cnd_t* dummy_cnd = curr_thread -> cond;
+        cnd_destroy(curr_thread -> cond);
+        free(dummy_thread);
+        free(dummy_cnd);
         curr_thread = curr_thread -> next;
     }
 
@@ -74,9 +76,19 @@ struct thread_instance* initialize_thread() {
     return thread;
 }
 
+ cnd_t* initialize_cond() {
+    cnd_t* cond = malloc(sizeof(cnd_t));
+    if (cond == NULL) {
+        fprintf(stderr, "Problem with memory allocation\n");
+        thread_error++;
+    }
+    return cond;
+}
+
 /* maintaining the threads queue */
 void enqueue_threads(struct thread_instance* thread) {
     struct thread_instance* curr_thread = initialize_thread();
+    curr_thread -> cond = initialize_cond();
     curr_thread -> next = NULL;
     if (thread_queue -> head == NULL) {
         thread_queue -> head = thread_queue -> tail = curr_thread;
@@ -127,34 +139,7 @@ void enqueue_dirs(char* path) {
 
 char* dequeue_dirs() {
     struct dir_instance* curr_dir;
-    struct thread_instance* curr_thread;
     char* ret_path = NULL;
-    while((queue -> size) == 0) {
-        if ((thread_queue -> size) == threads_num-1) {
-            /* if all of the threads are waiting but there aren't any directories 
-            in the queue, so we need to tell all the threads to exit */
-            while ((curr_thread = dequeue_threads()) != NULL) {
-                printf("signalingggggg\n");
-                cnd_signal(&(curr_thread -> cond));
-            }
-            mtx_unlock(&lock);
-            printf("going to exit now\n");
-            thrd_exit(0);
-        } else {
-            curr_thread = initialize_thread();
-            cnd_t condition = curr_thread -> cond;
-            cnd_init(&condition);
-            enqueue_threads(curr_thread);
-            cnd_wait(&condition, &lock);
-            cnd_destroy(&condition);
-            if ((thread_queue -> size) == threads_num) { 
-                /* if all of the threads finished */
-                mtx_unlock(&lock);
-                thrd_exit(0);
-            }
-        }   
-    }
-    /* when the next thread is ready, extract the next directory waiting to be searched */
     curr_dir = queue -> head;
     ret_path = malloc(((strlen(curr_dir -> dir_path))+1));
     if (ret_path == NULL) {
@@ -173,80 +158,101 @@ char* dequeue_dirs() {
     return ret_path;
 }
 
-int thread_func(void* thread_struct) {
+char* before_dequeue_dirs() {
+    struct thread_instance* curr_thread;
+    while((queue -> size) == 0) {
+        waiting_threads++;
+        if (waiting_threads == threads_num) {
+            /* if all of the threads are waiting but there aren't any directories 
+            in the queue, so we need to tell all the threads to exit */
+            while (thread_queue -> size > 0) {
+                curr_thread = dequeue_threads();
+                cnd_signal(curr_thread -> cond);
+            }
+            mtx_unlock(&lock);
+            thrd_exit(0);
+        }
+        curr_thread = initialize_thread();
+        curr_thread -> cond = initialize_cond();
+        cnd_init(curr_thread -> cond);
+        enqueue_threads(curr_thread);
+        cnd_wait(curr_thread -> cond, &lock);
+        cnd_destroy(curr_thread -> cond);
+        if (waiting_threads == threads_num) { 
+            mtx_unlock(&lock);
+            thrd_exit(0);
+        }
+        waiting_threads--;
+    }
+    /* when the next thread is ready, extract the next directory waiting to be searched */
+    return dequeue_dirs();
+    
+}
+
+int thread_func(void* thread) {
     DIR* curr_dir;
     char *curr_dir_name, *curr_entry_name, next_dir[PATH_MAX];
     struct dirent* dir_entry;
-    //struct thread_instance* curr_thread = (struct thread_instance*) thread_struct;
     mtx_lock(&lock);
     cnd_wait(&finished_creating_threads, &lock);
-    //curr_thread = dequeue_threads();
-    while (((thread_queue) -> size) < threads_num || (thread_queue -> size != 0 && queue -> size != 0)) {
-        printf("going into search now when the queue of threads has %d in it and queue of dics has %d in it\n", thread_queue->size, queue -> size);
+    while (waiting_threads < threads_num) {
          /* the actual file searching logic */
-        curr_dir_name = dequeue_dirs();
-        if ((curr_dir = opendir(curr_dir_name)) == NULL) {
+        curr_dir_name = before_dequeue_dirs();
+        curr_dir = opendir(curr_dir_name);
+        if (curr_dir == NULL) {
             fprintf(stderr, "Problem opening directory %s\n", curr_dir_name);
-            thread_error++;;
+            thread_error++;
+            continue;
         }
         while ((dir_entry = readdir(curr_dir)) != NULL) {
             curr_entry_name = dir_entry -> d_name;
-            if (!strcmp(curr_entry_name, ".") || !strcmp(curr_entry_name, "..")) {
-                /* in the case the current entry is the parent directory or the directory 
-                itself we want to move on to the next entry in the directory */
-                continue;
-            }
-            if ((dir_entry -> d_type) == 4) {
-                /* if the current entry is a directory */
-                strcpy(next_dir, curr_dir_name);
-                strcat(next_dir, "/");
-                strcat(next_dir, curr_entry_name);
+            strcpy(next_dir, curr_dir_name);
+            strcat(next_dir, "/");
+            strcat(next_dir, curr_entry_name);
+            if (!(!strcmp(curr_entry_name, ".") || !strcmp(curr_entry_name, "..")) && (dir_entry -> d_type == 4)) {
+                /* if the current entry is a directory but not the directory itself or its parent */
                 if ((!access(curr_entry_name, R_OK) && !access(curr_entry_name, X_OK))) {
                     printf("Directory %s: Permission denied.\n", next_dir);
-                    continue;
                 } else {
                     mtx_lock(&lock);
                     enqueue_dirs(next_dir);
                     if ((thread_queue -> head) != NULL) {
-                        cnd_signal(&((thread_queue -> head) -> cond));
+                        cnd_signal((thread_queue -> head) -> cond);
                     }
                     mtx_unlock(&lock);
                 }
             } else if (strstr(curr_entry_name, search_term)) {
                 /* if the current entry is a file and contains the search term */
-                printf("%s\n", curr_entry_name);
+                printf("%s\n", next_dir);
                 found_files++;
             }  
         }
-        closedir(curr_dir);
         mtx_lock(&lock);
+        closedir(curr_dir);
     }
     thrd_exit(0);
 }
 
 void create_threads() {
-    /* add into a queue here */
     int i;
     thrd_t thread_ids[threads_num];
     for (i = 0 ; i < threads_num ; i++) {
-        struct thread_instance* thread = initialize_thread();
-        cnd_init(&thread -> cond);
-        if (thrd_create(&thread_ids[i], thread_func, (void*)thread) != 0) {
+        if (thrd_create(&thread_ids[i], thread_func, NULL) != 0) {
             fprintf(stderr, "Failed creating thread\n");
             exit(1);
         }
     }
-
     /* without sleep(1) the broadcast does not work */
     sleep(1);
     cnd_broadcast(&finished_creating_threads);
     for (i = 0; i < threads_num; i++) {
         printf("going into join with i being %d\n", i);
         if ((thrd_join(thread_ids[i], NULL)) != 0) {
-            printf("heeeeeeeeeeeeeeeeeeeeeeeeeeeeey\n");
+            printf("Done searching, found %d files\n", found_files);
             fprintf(stderr, "Failed joining thread\n");
             exit(1);
         }
+        printf("finishing join with i being %d\n", i);
     }
     printf("did you finish joining?\n");
 }
@@ -300,6 +306,6 @@ int main(int argc, char* argv[]) {
     freeQueues();
     mtx_destroy(&lock);
     cnd_destroy(&finished_creating_threads);
-    int exit = thread_error == 0 ? 0 : 1;
-    return exit;
+    int detected = thread_error == 0 ? 0 : 1;
+    return detected;
 }

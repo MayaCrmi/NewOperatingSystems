@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <dirent.h>
+#include <errno.h>
 #include <string.h>
 #include <threads.h>
 #include <sys/stat.h>
@@ -23,30 +24,32 @@ struct dir_instance {
 struct fifo_dir_queue {
     struct dir_instance* head;
     struct dir_instance* tail;
-    int size;
+    int length;
 };
 
 struct thread_instance {
     struct thread_instance* next;
-    cnd_t cond;
+    cnd_t* cond;
 };
 
 struct thread_queue {
     struct thread_instance* head;
     struct thread_instance* tail;
-    int size;
+    int length;
 };
+
+#define THRD_SUCCESS 0
 
 char* search_term;
 int threads_num, created_threads, waiting_threads, thread_error, found_files;
-struct fifo_dir_queue* queue;
+struct fifo_dir_queue* dir_queue;
 struct thread_queue* thread_queue;
 cnd_t finished_creating_threads;
 mtx_t lock;
 
 /* freeing up the pointers from the queues we created during the search */
 void freeQueues() {
-    struct dir_instance* curr_dir = queue -> head;
+    struct dir_instance* curr_dir = dir_queue -> head;
     while (curr_dir) {
         struct dir_instance* dummy = curr_dir;
         free(dummy -> dir_path);
@@ -56,7 +59,8 @@ void freeQueues() {
     struct thread_instance* curr_thread = thread_queue -> head;
     while (curr_thread) {
         struct thread_instance* dummy_thread = curr_thread;
-        cnd_destroy(&dummy_thread -> cond);
+        cnd_t* dummy_cond = curr_thread -> cond;
+        cnd_destroy(dummy_cond);
         free(dummy_thread);
         curr_thread = curr_thread -> next;
     }
@@ -69,44 +73,45 @@ struct thread_instance* initialize_thread() {
         fprintf(stderr, "Problem with memory allocation\n");
         thread_error++;
     }
+    return thread;
+}
+
+cnd_t* initialize_condition(struct thread_instance* thread) {
     cnd_t* cond = malloc(sizeof(cnd_t));
     if (cond == NULL) {
         fprintf(stderr, "Problem with memory allocation\n");
         thread_error++;
     }
-    thread -> cond = *cond;
-    return thread;
+    thread -> cond = cond;
+    return cond;
 }
 
 /* maintaining the threads queue */
 void enqueue_threads(struct thread_instance* thread) {
-    struct thread_instance* curr_thread = initialize_thread();
-    curr_thread -> next = NULL;
-    if (thread_queue -> head == NULL) {
-        thread_queue -> head = thread_queue -> tail = curr_thread;
+    thread -> next = NULL;
+    if (thread_queue -> length == 0) {
+        thread_queue -> head = thread_queue -> tail = thread;
     } else {
-        (thread_queue -> tail) -> next = curr_thread;
-        thread_queue -> tail = curr_thread;
+        (thread_queue -> tail) -> next = thread;
+        thread_queue -> tail = thread;
     }
-    (thread_queue -> size)++;
+    (thread_queue -> length)++;
 }
 
-cnd_t dequeue_threads() {
-    cnd_t cond;
-    if (thread_queue -> head == NULL) {
+cnd_t* dequeue_threads() {
+    if (thread_queue -> length == 0) {
         fprintf(stderr, "No threads to dequeue\n");
         thread_error++;
-    } else {
-        struct thread_instance* curr_thread = initialize_thread();
-        curr_thread = thread_queue -> head;
-        cond = curr_thread -> cond;
-        thread_queue -> head = (thread_queue -> head) -> next;
-        free(curr_thread);
-        if (thread_queue -> head == NULL) {
-            thread_queue -> tail = NULL;
-        }
+        return NULL;
+    } 
+    struct thread_instance* thread = thread_queue -> head;
+    cnd_t* cond = thread -> cond;
+    thread_queue -> head = (thread_queue -> head) -> next;
+    if (thread_queue -> head == NULL) {
+        thread_queue -> tail = NULL;
     }
-    (thread_queue -> size)--;
+    (thread_queue -> length)--;
+    free(thread);
     return cond;
 }
 
@@ -125,58 +130,60 @@ void enqueue_dirs(char* path) {
     }
     curr_dir -> next = NULL;
     strcpy(curr_dir -> dir_path, path);
-    if (queue -> head == NULL) {
-        queue -> head = queue -> tail = curr_dir;
+    if (dir_queue -> length == 0) {
+        dir_queue -> head = dir_queue -> tail = curr_dir;
     } else {
-        (queue -> tail) -> next = curr_dir;
-        queue -> tail = curr_dir;
+        (dir_queue -> tail) -> next = curr_dir;
+        dir_queue -> tail = curr_dir;
     }
-    (queue -> size)++;
+    (dir_queue -> length)++;
 }
 
 char* dequeue_dirs() {
     struct dir_instance* curr_dir;
     char* ret_path = NULL;
-    curr_dir = queue -> head;
+    curr_dir = dir_queue -> head;
     ret_path = malloc(((strlen(curr_dir -> dir_path))+1));
     if (ret_path == NULL) {
         fprintf(stderr, "Problem with memory allocation\n");
         thread_error++;;
     }
     strcpy(ret_path, ((curr_dir) -> dir_path));
-    queue -> head = (queue -> head) -> next;
-    if (queue -> head == NULL) {
-        queue -> tail = NULL;
+    dir_queue -> head = (dir_queue -> head) -> next;
+    if (dir_queue -> head == NULL) {
+        dir_queue -> tail = NULL;
     }
     free(curr_dir -> dir_path);
     free(curr_dir);
-    (queue -> size)--;
+    (dir_queue -> length)--;
     mtx_unlock(&lock);
     return ret_path;
 }
 
 char* before_dequeue_dirs() {
     struct thread_instance* curr_thread;
-    while((queue -> size) == 0) {
+    cnd_t* curr_cond;
+    while((dir_queue -> length) == 0) {
         waiting_threads++;
         if (waiting_threads == threads_num) {
             /* if all of the threads are waiting but there aren't any directories 
             in the queue, so we need to tell all the threads to exit */
-            while (thread_queue -> size > 0) {
-                cnd_t cond = dequeue_threads();
-                cnd_signal(&cond);
+            while (thread_queue -> length > 0) {
+                curr_cond = dequeue_threads();
+                cnd_signal(curr_cond);
             }
             mtx_unlock(&lock);
-            thrd_exit(0);
+            thrd_exit(THRD_SUCCESS);
         }
         curr_thread = initialize_thread();
-        cnd_init(&curr_thread -> cond);
+        curr_cond = initialize_condition(curr_thread);
+        cnd_init(curr_cond);
         enqueue_threads(curr_thread);
-        cnd_wait(&curr_thread -> cond, &lock);
-        cnd_destroy(&curr_thread -> cond);
+        cnd_wait(curr_cond, &lock);
+        cnd_destroy(curr_cond);
         if (waiting_threads == threads_num) { 
             mtx_unlock(&lock);
-            thrd_exit(0);
+            thrd_exit(THRD_SUCCESS);
         }
         waiting_threads--;
     }
@@ -185,13 +192,14 @@ char* before_dequeue_dirs() {
     
 }
 
-int thread_func(void* thread) {
+int thread_logic(void* thread) {
     DIR* curr_dir;
     char *curr_dir_name, *curr_entry_name, next_dir[PATH_MAX];
     struct dirent* dir_entry;
+    struct stat statbuf;
     mtx_lock(&lock);
     cnd_wait(&finished_creating_threads, &lock);
-    while (waiting_threads < threads_num) {
+    while (waiting_threads < threads_num || thread_queue -> length > 0) {
          /* the actual file searching logic */
         curr_dir_name = before_dequeue_dirs();
         curr_dir = opendir(curr_dir_name);
@@ -205,34 +213,44 @@ int thread_func(void* thread) {
             strcpy(next_dir, curr_dir_name);
             strcat(next_dir, "/");
             strcat(next_dir, curr_entry_name);
-            if (!(!strcmp(curr_entry_name, ".") || !strcmp(curr_entry_name, "..")) && (dir_entry -> d_type == 4)) {
+            if (stat(next_dir, &statbuf)) {
+                fprintf(stderr, "Failed to get details for path %s: %s\n", next_dir, strerror(errno));
+                thread_error++;
+                continue;
+            }
+            if (S_ISDIR(statbuf.st_mode) && (!(!strcmp(curr_entry_name, ".") || !strcmp(curr_entry_name, "..")))) {
                 /* if the current entry is a directory but not the directory itself or its parent */
-                if ((!access(curr_entry_name, R_OK) && !access(curr_entry_name, X_OK))) {
-                    printf("Directory %s: Permission denied.\n", next_dir);
+                if (access(next_dir, R_OK | X_OK)) {
+                    if (errno == EACCES) {
+                        printf("Directory %s: Permission denied.\n", next_dir);
+                    } else {
+                        fprintf(stderr, "Could not check permissions for path %s: %s\n", next_dir, strerror(errno));
+                        thread_error++;
+                    }
                 } else {
                     mtx_lock(&lock);
                     enqueue_dirs(next_dir);
-                    if ((thread_queue -> head) != NULL) {
-                        cnd_signal(&(thread_queue -> head) -> cond);
+                    if ((thread_queue -> length) != 0) {
+                        cnd_signal((thread_queue -> head) -> cond);
                     }
                     mtx_unlock(&lock);
                 }
             } else if (strstr(curr_entry_name, search_term)) {
-                /* if the current entry is a file and contains the search term */
-                printf("%s\n", next_dir);
-                found_files++;
-            }  
+            /* if the current entry is a file and contains the search term */
+            printf("%s\n", next_dir);
+            found_files++;
+        }  
         }
-        mtx_lock(&lock);
         closedir(curr_dir);
+        mtx_lock(&lock);
     }
-    thrd_exit(0);
+    thrd_exit(THRD_SUCCESS);
 }
 
 void handle_threads() {
     thrd_t thread_ids[threads_num];
     for (int i = 0 ; i < threads_num ; i++) {
-        if (thrd_create(&thread_ids[i], thread_func, NULL) != 0) {
+        if (thrd_create(&thread_ids[i], thread_logic, NULL) != 0) {
             fprintf(stderr, "Failed creating thread\n");
             exit(1);
         }
@@ -241,15 +259,12 @@ void handle_threads() {
     sleep(1);
     cnd_broadcast(&finished_creating_threads);
     for (int i = 0; i < threads_num; i++) {
-        printf("going into join with i being %d\n", i);
         if ((thrd_join(thread_ids[i], NULL)) != 0) {
             printf("Done searching, found %d files\n", found_files);
             fprintf(stderr, "Failed joining thread\n");
             exit(1);
         }
-        printf("finishing join with i being %d\n", i);
     }
-    printf("did you finish joining?\n");
 }
 
 int main(int argc, char* argv[]) {
@@ -273,18 +288,19 @@ int main(int argc, char* argv[]) {
     threads_num = atoi(argv[3]);
 
     /* initializing the necessary structs */
-    queue = malloc(sizeof(struct fifo_dir_queue));
-    if (queue == NULL) {
+    dir_queue = malloc(sizeof(struct fifo_dir_queue));
+    if (dir_queue == NULL) {
         fprintf(stderr, "Could not initialize queue\n");
         exit(1);
     }
     thread_queue = malloc(sizeof(struct thread_queue));
-    if (queue == NULL) {
+    if (dir_queue == NULL) {
         fprintf(stderr, "Could not initialize queue\n");
         exit(1);
     }
-    queue -> head = queue -> tail = NULL;
+    dir_queue -> head = dir_queue -> tail = NULL;
     thread_queue -> head = thread_queue -> tail = NULL;
+    thread_queue -> length = dir_queue -> length = 0;
     
     /* before creating the threads, initialize the locks conditions and variables */
     mtx_init(&lock, mtx_plain);
@@ -301,6 +317,8 @@ int main(int argc, char* argv[]) {
     mtx_destroy(&lock);
     cnd_destroy(&finished_creating_threads);
     freeQueues();
-    int detected = thread_error == 0 ? 0 : 1;
+    free(dir_queue);
+    free(thread_queue);
+    int detected = thread_error == 0 ? THRD_SUCCESS : 1;
     return detected;
 }
